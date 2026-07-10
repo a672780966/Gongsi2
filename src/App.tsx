@@ -460,7 +460,7 @@ export default function App() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 {/* Hero Greeting Board */}
                 <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 rounded-2xl p-6 text-white shadow-md relative overflow-hidden flex flex-col md:flex-row md:items-center md:justify-between gap-6 border border-indigo-800">
@@ -508,7 +508,7 @@ export default function App() {
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
@@ -547,7 +547,7 @@ export default function App() {
                 key="properties-view"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -786,7 +786,7 @@ export default function App() {
                 key="crm-view"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -854,7 +854,7 @@ export default function App() {
                 key="contracts-view"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 <div>
                   <h2 className="text-lg font-display font-bold text-gray-950">合同租约起草 (Draft Lease Contracts)</h2>
@@ -875,7 +875,7 @@ export default function App() {
                 key="workorders-view"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 <div>
                   <h2 className="text-lg font-display font-bold text-gray-950">运维保障工单部 (Maintenance Work Orders)</h2>
@@ -924,7 +924,7 @@ export default function App() {
                 key="analytics-view"
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-6 max-w-5xl mx-auto"
+                className="space-y-6 w-full"
               >
                 <div>
                   <h2 className="text-lg font-display font-bold text-gray-950">项目效能数据盘点 (Workspace Conversion Hub)</h2>
