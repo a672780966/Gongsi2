@@ -1,0 +1,6 @@
+{
+  "name": "Unified Creation & Task Tracker",
+  "description": "A productivity workspace featuring a unified creation entry overlay, an persistent task progress tracker, and a comprehensive workflow resuming dashboard with interactive forms and todo/work order management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
