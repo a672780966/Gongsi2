@@ -10,6 +10,7 @@ import Sidebar from './components/Sidebar';
 import UnifiedCreatePanel from './components/UnifiedCreatePanel';
 import PropertyWizard from './components/PropertyWizard';
 import TaskOverview from './components/TaskOverview';
+import DashboardHome from './components/DashboardHome';
 
 // Preseed Default Draft Workflows
 const PRESEED_DRAFTS: PropertyDraft[] = [
@@ -360,23 +361,10 @@ export default function App() {
     triggerToast(`成功登记一单新的工作事项: “${newTodo.title}”！`, 'success');
   };
 
-  // Interactive scroll helper triggered by bottom left click (PRD Focus trigger)
+  // Interactive tab switcher triggered by bottom left click (PRD Focus trigger)
   const focusOnOverviewSection = () => {
-    setActiveTab('dashboard');
-    setTimeout(() => {
-      const section = document.getElementById('task-overview-container');
-      if (section) {
-        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        // Pulse background of drafts list briefly to guide user's attention
-        const draftsBox = document.getElementById('ongoing-drafts-section');
-        if (draftsBox) {
-          draftsBox.classList.add('ring-4', 'ring-indigo-200');
-          setTimeout(() => {
-            draftsBox.classList.remove('ring-4', 'ring-indigo-200');
-          }, 1500);
-        }
-      }
-    }, 150);
+    setActiveTab('task-hub');
+    triggerToast('已进入独立任务承接区工作台，支持断点流程恢复与催办协同。', 'info');
   };
 
   return (
@@ -479,11 +467,11 @@ export default function App() {
                   <div className="space-y-2 relative z-10">
                     <div className="inline-flex items-center space-x-1.5 bg-indigo-800/60 px-2.5 py-1 rounded-full text-[10px] font-bold text-indigo-200 border border-indigo-700/50">
                       <Sparkles className="w-3 h-3 text-indigo-300" />
-                      <span>PRD V1.0 - 动作发起层与过程状态层全面就位</span>
+                      <span>PM++ 协同大盘首页 v1.1 已发布</span>
                     </div>
                     <h2 className="text-xl md:text-2xl font-display font-bold">下午好，吴经理！今天是您的极速协作日</h2>
                     <p className="text-indigo-200 text-xs max-w-xl leading-relaxed">
-                      欢迎体验全新重构的系统首页。在此处，您可以通过左上角的“统一新建”发起任意录入；如果您在途中资料不全，可随时暂存，左下角的“任务进度器”将实时记住您的断点，在此页一键恢复！
+                      欢迎回到系统首页工作台。在此处您可以直观总览各模块核心经营仪表盘，查看今日紧急催办与待办摘要；需要恢复断点草稿时，可点击左下角【任务进度器】空降任务舱。
                     </p>
                   </div>
                   <button
@@ -495,6 +483,47 @@ export default function App() {
                   </button>
                   {/* Decorative faint background graphics */}
                   <div className="absolute right-0 bottom-0 top-0 w-1/3 bg-radial-gradient from-indigo-500/10 to-transparent pointer-events-none" />
+                </div>
+
+                {/* Core Dashboard Home Component */}
+                <DashboardHome 
+                  propertyDrafts={propertyDrafts}
+                  todoList={todoList}
+                  committedAssets={committedAssets}
+                  onLaunchDraft={(draftId) => {
+                    setActiveDraftId(draftId);
+                  }}
+                  onUrgeTask={handleUrgeTask}
+                  onCompleteTask={handleCompleteTask}
+                  onAddTodo={handleAddTodo}
+                  setActiveTab={setActiveTab}
+                />
+              </motion.div>
+            )}
+
+            {/* View A.5: Dedicated Task Hub / Continuation Workspace */}
+            {activeTab === 'task-hub' && (
+              <motion.div 
+                key="task-hub-view"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="space-y-6 max-w-5xl mx-auto"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-display font-bold text-gray-950">任务承接区与协同工作台 (Task Hub)</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">继续暂存中的建档向导、响应业务待办、跟踪催办指令办结进度。</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsCreatePanelOpen(true);
+                    }}
+                    className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center space-x-1.5 shadow-xs shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>发起全新建档</span>
+                  </button>
                 </div>
 
                 {/* Live Task Overview area */}

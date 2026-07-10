@@ -103,7 +103,11 @@ export default function Sidebar({
       <div 
         id="task-progress-tracker-box" 
         onClick={onFocusOverview}
-        className="m-4 p-4 rounded-xl bg-slate-900/80 border border-slate-800/80 hover:border-slate-700 hover:bg-slate-900 cursor-pointer transition-all flex flex-col space-y-3 shadow-inner"
+        className={`m-4 p-4 rounded-xl cursor-pointer transition-all flex flex-col space-y-3 shadow-inner ${
+          activeTab === 'task-hub'
+            ? 'bg-indigo-950/90 border-2 border-indigo-500 shadow-md shadow-indigo-900/20 text-slate-100'
+            : 'bg-slate-900/80 border border-slate-800/80 hover:border-slate-700 hover:bg-slate-900 text-slate-300'
+        }`}
         title="点击直接定位和恢复进行中的流程及待办事项"
       >
         <div className="flex items-center justify-between">
