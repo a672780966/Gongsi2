@@ -308,6 +308,93 @@ export default function App() {
     triggerToast(`房源 “${draft.propertyName}” 完美建档！审批单已同步至资产部，可前往房源管理展开浏览。`, 'success');
   };
 
+  const handleAssignSubmit = (draft: PropertyDraft, taskLabel: string) => {
+    // 1. Save or update the draft in draft list so they can restore/interact with it if needed
+    const updatedDrafts = [...propertyDrafts];
+    const draftIndex = updatedDrafts.findIndex(d => d.id === draft.id);
+    const updatedDraft = {
+      ...draft,
+      pendingAssignee: 'app_sales' as const,
+      pendingTaskLabel: taskLabel,
+      updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    };
+    if (draftIndex > -1) {
+      updatedDrafts[draftIndex] = updatedDraft;
+    } else {
+      updatedDrafts.push(updatedDraft);
+    }
+    setPropertyDrafts(updatedDrafts);
+    localStorage.setItem('pm_property_drafts', JSON.stringify(updatedDrafts));
+
+    // 2. Insert into committed assets (turns draft into a partial but approved asset)
+    const priceNum = Number(draft.price) || 0;
+    const priceStr = priceNum > 0 ? `¥${priceNum.toLocaleString()}/月` : '暂未定价';
+    const newAsset = {
+      id: `asset_${Date.now()}`,
+      name: draft.propertyName || '未命名项目',
+      type: draft.propertyType || 'residential',
+      area: `${draft.layoutArea || draft.area || '0'}㎡`,
+      price: priceStr,
+      address: draft.address || '地址待确认',
+      status: `待补录 (${taskLabel})`,
+      
+      isUpgradedAsset: true,
+      entryMode: draft.entryMode || 'new',
+      entryScope: draft.entryScope || 'full',
+      managementMode: draft.managementMode || 'central',
+      
+      projectInfo: {
+        propertyName: draft.propertyName || '未命名项目',
+        propertyAlias: draft.propertyAlias || '暂无项目别名',
+        propertySource: draft.propertySource || '主动开发',
+        address: draft.address || '暂无详细地址',
+        buildingNo: draft.buildingNo || '暂无单元楼栋',
+        description: draft.description || '暂无项目说明'
+      },
+      ownershipInfo: {
+        holdingType: draft.holdingType || 'self',
+        ownerName: draft.ownerName || '未录入',
+        ownerPhone: draft.ownerPhone || '未录入',
+        ownerRelation: draft.ownerRelation || '确权人本人',
+        ownerDocUploaded: draft.ownerDocUploaded || false
+      },
+      layoutInfo: draft.entryScope === 'skeleton' ? null : {
+        layoutName: draft.layoutName || '默认房型模版',
+        layoutArea: draft.layoutArea || '0',
+        layoutRoomsCount: draft.layoutRoomsCount || '0',
+        layoutBathroomCount: draft.layoutBathroomCount || '0',
+        layoutDirection: draft.layoutDirection || '南北朝向',
+        layoutBedType: draft.layoutBedType || '独立大床'
+      }
+    };
+    const updatedAssets = [newAsset, ...committedAssets];
+    setCommittedAssets(updatedAssets);
+    localStorage.setItem('pm_committed_assets', JSON.stringify(updatedAssets));
+
+    // 3. Insert an orange 'assign' TaskItem into the progress/todo list!
+    const assignTask: TaskItem = {
+      id: `task_assign_${Date.now()}`,
+      title: `【指派业务员】继续完善 ${draft.propertyName} 的 ${taskLabel}`,
+      module: draft.managementMode === 'central' ? '集中招商部' : (draft.managementMode === 'entire' ? '整租运营组' : '合租产品线'),
+      priority: 'high',
+      status: 'pending',
+      statusLabel: '待协同办理',
+      updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      assignee: 'App端外勤业务员-林工',
+      description: `老板已在管理大盘提前确认项目：${draft.propertyName}。现根据分岔录入规范指派外勤人员使用移动端 App 进行现场房型精修和房间分配。`,
+      taskKind: 'assign',
+      linkedDraftId: draft.id,
+      managementMode: draft.managementMode
+    };
+    const updatedTodos = [assignTask, ...todoList];
+    setTodoList(updatedTodos);
+    localStorage.setItem('pm_todo_list', JSON.stringify(updatedTodos));
+
+    // 4. Close wizard and notify
+    setActiveDraftId(null);
+    triggerToast(`老板停点确认成功！已发布协同待办并指派给业务员，请在下方“进度协同器”查看高亮指派任务！`, 'success');
+  };
+
   const handleDiscardDraft = (draftId: string) => {
     if (window.confirm('您确定要丢弃该房源建档流程吗？此草稿信息将永久擦除。')) {
       const filtered = propertyDrafts.filter(d => d.id !== draftId);
@@ -474,13 +561,6 @@ export default function App() {
                       欢迎回到系统首页工作台。在此处您可以直观总览各模块核心经营仪表盘，查看今日紧急催办与待办摘要；需要恢复断点草稿时，可点击左下角【任务进度器】空降任务舱。
                     </p>
                   </div>
-                  <button
-                    onClick={() => setIsCreatePanelOpen(true)}
-                    className="bg-white hover:bg-indigo-50 text-indigo-950 font-bold px-4.5 py-2 rounded-xl text-xs flex items-center space-x-1.5 shadow-sm transition-colors shrink-0 z-10 cursor-pointer self-start md:self-auto"
-                  >
-                    <span>统一发起业务</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
                   {/* Decorative faint background graphics */}
                   <div className="absolute right-0 bottom-0 top-0 w-1/3 bg-radial-gradient from-indigo-500/10 to-transparent pointer-events-none" />
                 </div>
@@ -515,15 +595,6 @@ export default function App() {
                     <h2 className="text-lg font-display font-bold text-gray-950">任务承接区与协同工作台 (Task Hub)</h2>
                     <p className="text-xs text-gray-500 mt-0.5">继续暂存中的建档向导、响应业务待办、跟踪催办指令办结进度。</p>
                   </div>
-                  <button 
-                    onClick={() => {
-                      setIsCreatePanelOpen(true);
-                    }}
-                    className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center space-x-1.5 shadow-xs shrink-0"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>发起全新建档</span>
-                  </button>
                 </div>
 
                 {/* Live Task Overview area */}
@@ -1028,6 +1099,7 @@ export default function App() {
           }}
           onSaveDraft={handleSaveDraft}
           onSubmit={handleSubmitDraft}
+          onAssignSubmit={handleAssignSubmit}
           initialDrafts={propertyDrafts}
         />
       )}

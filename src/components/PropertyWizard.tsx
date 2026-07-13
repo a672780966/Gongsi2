@@ -5,7 +5,7 @@ import {
   MapPin, DollarSign, Layers, Check, UploadCloud, Info, Trash2,
   Building, Key, Home, Plus, AlertCircle, Sparkles
 } from 'lucide-react';
-import { PropertyDraft } from '../types';
+import { PropertyDraft, getActiveSteps, getBossStopStepId } from '../types';
 
 interface PropertyWizardProps {
   draftId?: string | null;
@@ -13,6 +13,7 @@ interface PropertyWizardProps {
   onSaveDraft: (draft: PropertyDraft) => void;
   onSubmit: (draft: PropertyDraft) => void;
   initialDrafts: PropertyDraft[];
+  onAssignSubmit: (draft: PropertyDraft, assignLabel: string) => void;
 }
 
 const PROPERTY_TYPES = [
@@ -34,10 +35,10 @@ const ENTRY_MODES = [
   { id: 'existing', label: '已有项目补录', icon: '📝', desc: '项目已存在，仅补齐缺失的主体关系、房型模板或房间' }
 ];
 
-const ENTRY_SCOPES = [
-  { id: 'skeleton', label: '仅项目骨架', icon: '🏗️', desc: '仅录入项目名、详细地址和权属主体，不生成具体房间' },
-  { id: 'layout', label: '项目 + 房型体系', icon: '📐', desc: '录入项目的同时，预设核心房型参数模板，不生成房间' },
-  { id: 'full', label: '项目 + 房型 + 房间全量', icon: '🌈', desc: '一站式打穿，完成项目、主体、房型到所有房间排号生成' }
+const ENTRY_DEPTHS = [
+  { id: 'skeleton', label: '仅骨架（老板可停）', icon: '🏗️', desc: '只录地址与主体，房型/房间派给业务员' },
+  { id: 'to_contract', label: '到合同（整租/合租老板路径）', icon: '🔑', desc: '录到签署合同即停，后段指派 App' },
+  { id: 'full', label: '全量打穿', icon: '🌈', desc: '走完该管理线全部步骤' }
 ];
 
 const HOLDING_TYPES = [
@@ -51,7 +52,8 @@ export default function PropertyWizard({
   onClose, 
   onSaveDraft, 
   onSubmit, 
-  initialDrafts 
+  initialDrafts,
+  onAssignSubmit
 }: PropertyWizardProps) {
   
   // Initialize with upgraded full draft schema
@@ -75,6 +77,7 @@ export default function PropertyWizard({
     managementMode: 'central',
     entryMode: 'new',
     entryScope: 'full',
+    entryDepth: 'full',
     supplementTargetStep: 2,
 
     // Step 2 defaults
@@ -135,19 +138,11 @@ export default function PropertyWizard({
         updatedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       };
       
-      // Keep stage name synced with currentStep
-      const STAGE_MAP: Record<number, { key: any, name: string }> = {
-        1: { key: 'prep', name: '录入前准备' },
-        2: { key: 'project', name: '项目基础信息' },
-        3: { key: 'ownership', name: '产权/房东主体' },
-        4: { key: 'layout', name: '房型体系建立' },
-        5: { key: 'rooms', name: '房间结构生成' },
-        6: { key: 'closing', name: '费用、备注与附件' }
-      };
-      const stage = STAGE_MAP[updated.currentStep];
-      if (stage) {
-        updated.currentStageKey = stage.key;
-        updated.currentStageName = stage.name;
+      const active = getActiveSteps(updated.managementMode!, updated.entryDepth || 'full');
+      const stepDef = active.find(s => s.id === updated.currentStep);
+      if (stepDef) {
+        updated.currentStageKey = stepDef.key as any;
+        updated.currentStageName = stepDef.label;
       }
 
       return updated;
@@ -156,28 +151,19 @@ export default function PropertyWizard({
   };
 
   const handleNext = () => {
-    // Step 1 path division
-    if (formData.currentStep === 1) {
-      if (formData.entryMode === 'existing' && formData.supplementTargetStep) {
-        const target = formData.supplementTargetStep;
-        // Scope sanity check before jumping
-        if (formData.entryScope === 'skeleton' && (target === 4 || target === 5)) {
-          setErrorMessage('【范围冲突】当前“仅骨架”数据范围下，无法进行房型或房间补录，请调整范围。');
-          return;
-        }
-        if (formData.entryScope === 'layout' && target === 5) {
-          setErrorMessage('【范围冲突】当前“项目+房型”数据范围下，无法进行房间生成补录，请调整范围。');
-          return;
-        }
-        updateField('currentStep', target);
-        return;
-      }
-      updateField('currentStep', 2);
+    const active = getActiveSteps(formData.managementMode!, formData.entryDepth || 'full');
+    const currIdx = active.findIndex(s => s.id === formData.currentStep);
+    
+    if (currIdx === -1) {
+      updateField('currentStep', active[0]?.id || 1);
       return;
     }
 
+    const currentStepDef = active[currIdx];
+    const currentStepKey = currentStepDef?.key || 'prep';
+
     // Step-by-step rigorous logical validation
-    if (formData.currentStep === 2) {
+    if (currentStepKey === 'skeleton') {
       if (!formData.propertyName.trim()) {
         setErrorMessage('【必填提示】请输入项目/楼宇基础名称（项目基础信息层骨架）');
         return;
@@ -190,32 +176,65 @@ export default function PropertyWizard({
         setErrorMessage('【必填提示】请输入楼栋/单元等落点（例如: 1号楼2单元）');
         return;
       }
-    }
-
-    if (formData.currentStep === 3) {
-      if (!formData.ownerName?.trim()) {
-        setErrorMessage('【必填提示】请输入产权/房东主体名称（权属关系安全限制）');
+      if (!formData.doorNo?.trim()) {
+        setErrorMessage('【必填提示】请输入物理门牌号（基础骨架硬核指标）');
         return;
       }
-      if (!formData.ownerPhone?.trim()) {
-        setErrorMessage('【必填提示】请输入主体联系电话，用作工单分发与租约催缴');
+      if (!formData.houseType) {
+        setErrorMessage('【必填提示】请选择物理房屋类型（基础骨架硬核指标）');
         return;
       }
     }
 
-    if (formData.currentStep === 4) {
+    if (currentStepKey === 'ownership') {
+      const isLease = formData.holdingType === 'lease';
+      const isOther = formData.holdingType === 'other';
+      if (isLease) {
+        if (!formData.ownerName?.trim()) {
+          setErrorMessage('【必填提示】请输入产权/房东主体名称（权属关系安全限制）');
+          return;
+        }
+        if (!formData.ownerPhone?.trim()) {
+          setErrorMessage('【必填提示】请输入主体联系电话，用作工单分发与租约催缴');
+          return;
+        }
+        if (!formData.leaseStart || !formData.leaseEnd) {
+          setErrorMessage('【必填提示】请输入托管租赁合同起止日期');
+          return;
+        }
+        if (!formData.rentPrice || Number(formData.rentPrice) <= 0) {
+          setErrorMessage('【必填提示】请输入合法的收房价格');
+          return;
+        }
+        if (!formData.deposit || Number(formData.deposit) < 0) {
+          setErrorMessage('【必填提示】请输入房屋押金方案');
+          return;
+        }
+      } else if (isOther) {
+        if (!formData.ownerName?.trim()) {
+          setErrorMessage('【必填提示】请输入合作主体名称');
+          return;
+        }
+        if (!formData.ownerPhone?.trim()) {
+          setErrorMessage('【必填提示】请输入联系电话');
+          return;
+        }
+      }
+    }
+
+    if (currentStepKey === 'layout') {
       if (formData.hasLayoutTemplate) {
         if (!formData.layoutName?.trim()) {
           setErrorMessage('【必填提示】请拟定房型模板名称（如: 舒适大床房、标准三居室）');
           return;
         }
         if (!formData.layoutArea || Number(formData.layoutArea) <= 0) {
-          updateField('layoutArea', '50'); // default fallback instead of blocking if type error
+          updateField('layoutArea', '50');
         }
       }
     }
 
-    if (formData.currentStep === 5) {
+    if (currentStepKey === 'rooms_gen') {
       const fStart = Number(formData.floorStart);
       const fEnd = Number(formData.floorEnd);
       const roomsCount = Number(formData.roomsPerFloor);
@@ -230,38 +249,19 @@ export default function PropertyWizard({
       }
     }
 
-    if (formData.currentStep < 6) {
-      let nextStep = formData.currentStep + 1;
-      
-      // Dynamic Branching Path Based on Entry Scope
-      if (formData.entryScope === 'skeleton' && formData.currentStep === 3) {
-        nextStep = 6; // skip Step 4 and 5
-      } else if (formData.entryScope === 'layout' && formData.currentStep === 4) {
-        nextStep = 6; // skip Step 5
-      }
-      
-      updateField('currentStep', nextStep);
+    if (currIdx < active.length - 1) {
+      const nextStepId = active[currIdx + 1].id;
+      updateField('currentStep', nextStepId);
     }
   };
 
   const handleBack = () => {
-    if (formData.currentStep > 1) {
-      // In existing mode, if they are back to their starting jump step, return to Step 1
-      if (formData.entryMode === 'existing' && formData.currentStep === formData.supplementTargetStep) {
-        updateField('currentStep', 1);
-        return;
-      }
-      
-      let prevStep = formData.currentStep - 1;
-      
-      // Reverse branching paths
-      if (formData.entryScope === 'skeleton' && formData.currentStep === 6) {
-        prevStep = 3; // return to ownership
-      } else if (formData.entryScope === 'layout' && formData.currentStep === 6) {
-        prevStep = 4; // return to layout
-      }
-      
-      updateField('currentStep', prevStep);
+    const active = getActiveSteps(formData.managementMode!, formData.entryDepth || 'full');
+    const currIdx = active.findIndex(s => s.id === formData.currentStep);
+    
+    if (currIdx > 0) {
+      const prevStepId = active[currIdx - 1].id;
+      updateField('currentStep', prevStepId);
     }
   };
 
@@ -340,7 +340,7 @@ export default function PropertyWizard({
 
   // Helper to generate simulated room number list
   const getSimulatedRooms = () => {
-    if (formData.entryScope === 'skeleton' || formData.entryScope === 'layout') {
+    if (formData.entryDepth === 'skeleton' || (formData.entryDepth === 'to_contract' && formData.managementMode !== 'shared')) {
       return [];
     }
     const fStart = Number(formData.floorStart) || 1;
@@ -348,21 +348,87 @@ export default function PropertyWizard({
     const count = Number(formData.roomsPerFloor) || 4;
     const list: string[] = [];
     
-    for (let f = fStart; f <= fEnd; f++) {
-      // Allow excluding floors
-      if (formData.exceptionsList?.includes(`${f}层`)) continue;
-      
-      for (let r = 1; r <= count; r++) {
-        const rStr = r < 10 ? `0${r}` : `${r}`;
-        const roomNo = `${f}${rStr}`;
-        if (formData.exceptionsList?.includes(roomNo)) continue;
-        list.push(roomNo);
+    if (formData.managementMode === 'shared') {
+      const roomLetters = ['A (主卧)', 'B (次卧)', 'C (小卧)', 'D (阳台房)'];
+      for (let f = fStart; f <= fEnd; f++) {
+        // Allow excluding floors
+        if (formData.exceptionsList?.includes(`${f}层`)) continue;
+        
+        for (let r = 1; r <= count; r++) {
+          const rStr = r < 10 ? `0${r}` : `${r}`;
+          const suiteNo = `${f}${rStr}`;
+          if (formData.exceptionsList?.includes(suiteNo)) continue;
+          
+          // Render 3 rooms for this suite by default (A/B/C)
+          for (let k = 0; k < 3; k++) {
+            const roomNo = `${suiteNo}-${roomLetters[k]}`;
+            if (formData.exceptionsList?.includes(roomNo)) continue;
+            list.push(roomNo);
+          }
+        }
+      }
+    } else {
+      for (let f = fStart; f <= fEnd; f++) {
+        // Allow excluding floors
+        if (formData.exceptionsList?.includes(`${f}层`)) continue;
+        
+        for (let r = 1; r <= count; r++) {
+          const rStr = r < 10 ? `0${r}` : `${r}`;
+          const roomNo = `${f}${rStr}`;
+          if (formData.exceptionsList?.includes(roomNo)) continue;
+          list.push(roomNo);
+        }
       }
     }
     return list;
   };
 
   const simulatedRooms = getSimulatedRooms();
+
+  const renderPathPreview = () => {
+    const active = getActiveSteps(formData.managementMode!, formData.entryDepth || 'full');
+    const bossStopId = getBossStopStepId(formData.managementMode!, formData.entryDepth || 'full');
+    return (
+      <div className="bg-indigo-950/90 text-white rounded-xl p-4 border border-indigo-900 space-y-3 shadow-md mt-4">
+        <div className="flex items-center justify-between border-b border-indigo-900/60 pb-2">
+          <span className="text-[11px] font-bold text-indigo-300 flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>🚀 智能分岔：生成路径实时预览 (Generation Path Preview)</span>
+          </span>
+          <span className="text-[10px] bg-indigo-900/80 border border-indigo-800 text-indigo-200 px-2 rounded">
+            {formData.managementMode === 'central' ? '集中管理' : formData.managementMode === 'entire' ? '整租管理' : '合租管理'} • {(formData.entryDepth || 'full') === 'skeleton' ? '仅骨架' : (formData.entryDepth || 'full') === 'to_contract' ? '到合同' : '全量'}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+          {active.map((step, index) => {
+            const isStop = step.id === bossStopId;
+            return (
+              <React.Fragment key={step.id}>
+                {index > 0 && <span className="text-indigo-700 mx-0.5">→</span>}
+                <div className={`px-2 py-1 rounded border flex items-center gap-1 ${
+                  isStop 
+                    ? 'bg-emerald-950 border-emerald-600 text-emerald-300 font-bold font-semibold' 
+                    : 'bg-indigo-900/40 border-indigo-800/60 text-indigo-100'
+                }`}>
+                  <span>{step.label}</span>
+                  {isStop && <span className="text-[8px] bg-emerald-900 text-emerald-400 px-1 rounded">老板停点</span>}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        {bossStopId && (
+          <p className="text-[10px] text-emerald-400/90 font-sans leading-relaxed">
+            💡 <strong>路径终结：</strong>老板在 <strong>第 {active.findIndex(s => s.id === bossStopId) + 1} 步 ({active.find(s => s.id === bossStopId)?.label})</strong> 可以提前完规避或一键指派。
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const activeSteps = getActiveSteps(formData.managementMode!, formData.entryDepth || 'full');
+  const currentStepDef = activeSteps.find(s => s.id === formData.currentStep);
+  const currentStepKey = currentStepDef?.key || 'prep';
 
   return (
     <div id="property-wizard-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs p-4">
@@ -431,7 +497,7 @@ export default function PropertyWizard({
                   <h2 className="text-base font-display font-bold text-gray-950 flex items-center">
                     <span>房源建档业务链</span>
                     <span className="text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full ml-2 font-mono font-bold">
-                      步骤 {formData.currentStep} / 6
+                      步骤 {getActiveSteps(formData.managementMode!, formData.entryDepth || 'full').findIndex(s => s.id === formData.currentStep) + 1} / {getActiveSteps(formData.managementMode!, formData.entryDepth || 'full').length}
                     </span>
                   </h2>
                   <p className="text-[11px] text-gray-500">
@@ -462,45 +528,18 @@ export default function PropertyWizard({
             </div>
 
             {/* Stepper Wizard Horizontal Tracker */}
-            <div className="px-6 py-3.5 border-b border-gray-100 bg-white grid grid-cols-2 md:grid-cols-6 gap-2 shrink-0">
-              {steps.map((step, idx) => {
-                const stepNum = idx + 1;
-                
-                // Determine if this step is bypassed based on selected entryScope
-                const isBypassed = (formData.entryScope === 'skeleton' && (stepNum === 4 || stepNum === 5)) ||
-                                   (formData.entryScope === 'layout' && stepNum === 5);
-
+            <div className="px-6 py-3.5 border-b border-gray-100 bg-white flex flex-wrap gap-2 shrink-0">
+              {getActiveSteps(formData.managementMode!, formData.entryDepth || 'full').map((step, idx) => {
+                const stepNum = step.id;
+                const activeSteps = getActiveSteps(formData.managementMode!, formData.entryDepth || 'full');
+                const currIndex = activeSteps.findIndex(s => s.id === formData.currentStep);
                 const isActive = formData.currentStep === stepNum;
-                const isCompleted = formData.currentStep > stepNum;
-
-                if (isBypassed) {
-                  return (
-                    <div
-                      key={idx}
-                      className="flex items-start p-1.5 rounded-lg text-left bg-gray-50 border-l-2 border-dashed border-gray-300 opacity-40 cursor-not-allowed select-none"
-                      title={`当前“${formData.entryScope === 'skeleton' ? '仅骨架' : '仅房型'}”范围已排除此步骤`}
-                    >
-                      <div className="space-y-0.5">
-                        <div className="flex items-center space-x-1.5">
-                          <span className="text-[10px] font-mono font-bold flex items-center justify-center rounded-full w-4 h-4 bg-gray-200 text-gray-400">
-                            —
-                          </span>
-                          <span className="text-[11px] font-bold text-gray-450 line-through">
-                            {step.title}
-                          </span>
-                        </div>
-                        <p className="text-[8px] text-gray-400 pl-5 truncate max-w-[125px] hidden md:block">
-                          {formData.entryScope === 'skeleton' ? '骨架排除' : '房型排除'}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                }
+                const isCompleted = currIndex > idx;
 
                 return (
                   <button
                     key={idx}
-                    disabled={stepNum > formData.currentStep && !formData.propertyName}
+                    disabled={idx > currIndex && !formData.propertyName}
                     onClick={() => updateField('currentStep', stepNum)}
                     className={`flex items-start p-1.5 rounded-lg text-left transition-all relative overflow-hidden ${
                       isActive ? 'bg-indigo-50/50 border-l-2 border-indigo-600' : 
@@ -513,17 +552,28 @@ export default function PropertyWizard({
                           isActive ? 'bg-indigo-600 text-white' : 
                           isCompleted ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'
                         }`}>
-                          {isCompleted ? <Check className="w-2.5 h-2.5 stroke-[3.5px]" /> : stepNum}
+                          {isCompleted ? <Check className="w-2.5 h-2.5 stroke-[3.5px]" /> : idx + 1}
                         </span>
-                        <span className={`text-[11px] font-bold ${
+                        <span className={`text-[11px] font-bold flex items-center gap-1 ${
                           isActive ? 'text-indigo-600' : 
                           isCompleted ? 'text-emerald-700' : 'text-gray-500'
                         }`}>
-                          {step.title}
+                          <span>{step.label}</span>
+                          {step.roleTag && (
+                            <span className="text-[9px] bg-orange-100 text-orange-700 px-1 rounded font-normal shrink-0">
+                              {step.roleTag}
+                            </span>
+                          )}
                         </span>
                       </div>
                       <p className="text-[9px] text-gray-400 pl-5 truncate max-w-[120px] hidden md:block">
-                        {step.desc}
+                        {step.key === 'prep' ? '类型模式分流' : 
+                         step.key === 'skeleton' ? '空间物理骨架' : 
+                         step.key === 'ownership' ? '持有类型权属' : 
+                         step.key === 'bill_gate' ? '账单核对门槛' : 
+                         step.key === 'contract' ? '合同协议签署' : 
+                         step.key === 'layout' ? '空间参数模板' : 
+                         step.key === 'rooms_gen' ? '批量排号匹配' : '定价收口核验'}
                       </p>
                     </div>
                   </button>
@@ -544,7 +594,7 @@ export default function PropertyWizard({
               <AnimatePresence mode="wait">
                 
                 {/* STEP 1: 录入前准备 (Preparation) */}
-                {formData.currentStep === 1 && (
+                {currentStepKey === 'prep' && (
                   <motion.div 
                     key="step-prep"
                     initial={{ opacity: 0, y: 10 }}
@@ -558,12 +608,11 @@ export default function PropertyWizard({
                         <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">纵向业务路径分流判断（录入前准备）</h3>
                       </div>
                       <p className="text-gray-400 text-[11px] leading-relaxed">
-                        这一层的目的是让系统根据房源业态、租售手段和补件层级自动调整表单参数，判断合规机制，而不是一上来就强行塞给您一个超大表单。
+                        根据房源业态、租售手段和补件层级自动调整步骤与合规机制，避免不必要的冗余输入。
                       </p>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      
                       {/* Sub-Card A: Property Type Selection */}
                       <div className="space-y-2.5">
                         <label className="block text-xs font-bold text-gray-700">1. 资产与房源类别 (Property Type)</label>
@@ -589,9 +638,8 @@ export default function PropertyWizard({
                         </div>
                       </div>
 
-                      {/* Sub-Card B: Management & Entry Mode */}
+                      {/* Sub-Card B: Management & Depth Selection */}
                       <div className="space-y-5">
-                        
                         <div className="space-y-2.5">
                           <label className="block text-xs font-bold text-gray-700">2. 主力管理模式 (Management Mode)</label>
                           <div className="grid grid-cols-1 gap-2">
@@ -599,7 +647,9 @@ export default function PropertyWizard({
                               <button
                                 key={mode.id}
                                 type="button"
-                                onClick={() => updateField('managementMode', mode.id)}
+                                onClick={() => {
+                                  updateField('managementMode', mode.id);
+                                }}
                                 className={`p-3 rounded-xl border text-left flex items-start space-x-3 transition-all ${
                                   formData.managementMode === mode.id 
                                     ? 'bg-indigo-50/40 border-indigo-600 ring-1 ring-indigo-600' 
@@ -617,260 +667,219 @@ export default function PropertyWizard({
                         </div>
 
                         <div className="space-y-2.5">
-                          <label className="block text-xs font-bold text-gray-700">3. 录入模式与数据范围 (Entry Configuration)</label>
-                          <div className="grid grid-cols-2 gap-2">
-                            {ENTRY_MODES.map((em) => (
+                          <label className="block text-xs font-bold text-gray-700">3. 录入数据范围与停点深度 (Depth Scope)</label>
+                          <div className="grid grid-cols-1 gap-2">
+                            {ENTRY_DEPTHS.map((depth) => (
                               <button
-                                key={em.id}
+                                key={depth.id}
                                 type="button"
-                                onClick={() => updateField('entryMode', em.id)}
-                                className={`p-3 rounded-xl border text-left space-y-1 transition-all ${
-                                  formData.entryMode === em.id 
+                                onClick={() => updateField('entryDepth', depth.id)}
+                                className={`p-3 rounded-xl border text-left flex items-start space-x-3 transition-all ${
+                                  (formData.entryDepth || 'full') === depth.id 
                                     ? 'bg-indigo-50/40 border-indigo-600 ring-1 ring-indigo-600' 
                                     : 'bg-white border-gray-200 hover:border-gray-300'
                                 }`}
                               >
-                                <span className="text-xs font-bold text-gray-900 block flex items-center space-x-1">
-                                  <span>{em.icon}</span>
-                                  <span>{em.label}</span>
-                                </span>
-                                <span className="text-[9px] text-gray-400 block leading-tight">{em.desc}</span>
-                              </button>
-                            ))}
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-2 mt-2">
-                            {ENTRY_SCOPES.map((sc) => (
-                              <button
-                                key={sc.id}
-                                type="button"
-                                onClick={() => updateField('entryScope', sc.id)}
-                                className={`p-2.5 rounded-xl border text-left space-y-1 transition-all ${
-                                  formData.entryScope === sc.id 
-                                    ? 'bg-indigo-50/40 border-indigo-600 ring-1 ring-indigo-600' 
-                                    : 'bg-white border-gray-200 hover:border-gray-300'
-                                }`}
-                              >
-                                <span className="text-[10px] font-bold text-gray-950 block">{sc.label}</span>
-                                <span className="text-[8px] text-gray-400 block leading-tight">{sc.desc}</span>
+                                <span className="text-lg bg-gray-50 p-1.5 rounded-lg border border-gray-100">{depth.icon}</span>
+                                <div>
+                                  <span className="text-xs font-bold text-gray-900 block">{depth.label}</span>
+                                  <span className="text-[10px] text-gray-400 mt-0.5 block leading-normal">{depth.desc}</span>
+                                </div>
                               </button>
                             ))}
                           </div>
                         </div>
-
                       </div>
                     </div>
 
-                    {/* Supplementary Target Selection Layer (Only visible when entryMode === 'existing') */}
-                    {formData.entryMode === 'existing' && (
-                      <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        className="bg-indigo-50/40 rounded-2xl border border-indigo-100 p-5 space-y-3.5 mt-4"
-                      >
-                        <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
-                          <div className="flex items-center space-x-2">
-                            <span className="bg-indigo-600 text-white font-black px-1.5 py-0.5 text-[9px] rounded-sm uppercase font-mono tracking-wider">補件補錄</span>
-                            <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
-                              补录目标步骤选择 (Direct Jump Step Target)
-                            </h4>
-                          </div>
-                          <span className="text-[10px] text-indigo-600 font-mono font-bold">补录模式真实生效</span>
-                        </div>
-                        <p className="text-gray-500 text-[11px] leading-relaxed">
-                          当前为已有项目补录模式。系统已免去强制100%线性表单，请在下方选择本次需要补齐、纠偏或上传证明的特定纵向业务模块。点击下一步时系统将直接跳转。
-                        </p>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 pt-1">
-                          {[
-                            { step: 2, label: '2. 项目基础信息', icon: '🏗️', desc: '补录落点物理单元' },
-                            { step: 3, label: '3. 产权房东主体', icon: '🔑', desc: '补齐所有权和确权' },
-                            { step: 4, label: '4. 房型体系模板', icon: '📐', desc: '预设套内户型参数', scopeConstraint: 'skeleton' },
-                            { step: 5, label: '5. 房间排号生成', icon: '⚡', desc: '物理生成区间房型', scopeConstraint: 'layout' },
-                            { step: 6, label: '6. 费用备注与附件', icon: '📁', desc: '定价收口及测绘图' }
-                          ].map((opt) => {
-                            // Calculate if this option is disabled based on current entryScope
-                            const isRestricted = (formData.entryScope === 'skeleton' && (opt.step === 4 || opt.step === 5)) ||
-                                                 (formData.entryScope === 'layout' && opt.step === 5);
-                            const isSelected = formData.supplementTargetStep === opt.step;
-
-                            return (
-                              <button
-                                key={opt.step}
-                                type="button"
-                                disabled={isRestricted}
-                                onClick={() => updateField('supplementTargetStep', opt.step)}
-                                className={`p-3 rounded-xl border text-left flex flex-col justify-between h-24 transition-all ${
-                                  isRestricted 
-                                    ? 'bg-gray-100/50 border-gray-100 opacity-45 cursor-not-allowed' 
-                                    : isSelected 
-                                      ? 'bg-white border-indigo-600 ring-2 ring-indigo-600/30 shadow-2xs' 
-                                      : 'bg-white border-gray-200 hover:border-gray-300 active:bg-slate-50'
-                                }`}
-                              >
-                                <div className="space-y-1 w-full">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">{opt.icon}</span>
-                                    {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />}
-                                  </div>
-                                  <span className="text-[11px] font-bold text-gray-900 block leading-tight truncate">{opt.label}</span>
-                                  <span className="text-[9px] text-gray-400 block leading-tight mt-0.5 line-clamp-2">{opt.desc}</span>
-                                </div>
-
-                                {isRestricted && (
-                                  <span className="text-[8px] text-rose-500 font-bold block mt-1.5 border-t border-gray-100 pt-1 leading-none">
-                                    因{formData.entryScope === 'skeleton' ? '骨架' : '房型'}范围排除
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </motion.div>
-                    )}
-
+                    {/* Generation Path Preview */}
+                    {renderPathPreview()}
                   </motion.div>
                 )}
 
-                {/* STEP 2: 项目基础信息 (Project Infrastructure Skeleton) */}
-                {formData.currentStep === 2 && (
+                {/* STEP 2: 项目物理骨架 (Project Infrastructure Skeleton) */}
+                {currentStepKey === 'skeleton' && (
                   <motion.div 
-                    key="step-project"
+                    key="step-skeleton"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     className="space-y-6"
                   >
-                    <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-2xs space-y-3">
-                      <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center space-x-1.5">
-                        <span className="w-1.5 h-3 bg-indigo-600 rounded-xs" />
-                        <span>建立项目物理骨架</span>
-                      </h3>
-                      <p className="text-gray-400 text-[11px] leading-relaxed">
-                        项目基础层是未来所有合同契约和租客工单绑定的空间落点，不在本层填报冗长的费用明细或房东资料。
-                      </p>
+                    <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl flex items-start space-x-3">
+                      <span className="p-1 rounded bg-indigo-100 text-indigo-700"><MapPin className="w-4 h-4" /></span>
+                      <div>
+                        <h4 className="text-xs font-bold text-indigo-900">1. 登记项目物理骨架信息 (Project Skeleton)</h4>
+                        <p className="text-indigo-700 text-[11px] mt-0.5">请录入该项目/资产的物理大楼位置信息。此物理结构一旦建档，将成为后续所有房间匹配的物理基础。</p>
+                      </div>
                     </div>
 
-                    <div className="bg-white rounded-xl border border-gray-200/80 p-6 space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            项目/楼宇正式名称 <span className="text-rose-500">*</span>
-                          </label>
-                          <input
-                            id="wizard-property-name-input"
-                            type="text"
-                            value={formData.propertyName}
-                            onChange={(e) => updateField('propertyName', e.target.value)}
-                            placeholder="如: 临港科技智慧大厦、星河湾三期"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            项目别名 / 内部代码代称
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.propertyAlias || ''}
-                            onChange={(e) => updateField('propertyAlias', e.target.value)}
-                            placeholder="如: LINGGANG-T1, 星河湾大平层组团"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-5 rounded-xl border border-gray-200/80">
+                      <div className="col-span-1 md:col-span-2 space-y-1">
+                        <label className="block text-xs font-bold text-gray-700">项目/资产名称 (Property Name) *</label>
+                        <input 
+                          type="text" 
+                          id="wizard-property-name-input"
+                          value={formData.propertyName || ''} 
+                          onChange={(e) => updateField('propertyName', e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                          placeholder="例如: 虹桥科创青年社区 / 世纪大道合租公馆"
+                        />
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            物理绝对地址 / 城市定位 <span className="text-rose-500">*</span>
-                          </label>
-                          <div className="relative">
-                            <input
-                              id="wizard-address-input"
-                              type="text"
-                              value={formData.address}
-                              onChange={(e) => updateField('address', e.target.value)}
-                              placeholder="例如: 上海市浦东新区张江大道555号"
-                              className="w-full pl-9 pr-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                            />
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
-                              <MapPin className="w-4 h-4" />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            楼栋 / 单元 / 幢范围描述 <span className="text-rose-500">*</span>
-                          </label>
-                          <input
-                            id="wizard-building-input"
-                            type="text"
-                            value={formData.buildingNo}
-                            onChange={(e) => updateField('buildingNo', e.target.value)}
-                            placeholder="如: 3号楼2单元整幢、A座15层全层"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-gray-700">城市 (City) *</label>
+                        <input 
+                          type="text" 
+                          value={formData.city || ''} 
+                          onChange={(e) => updateField('city', e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                          placeholder="例如: 上海市"
+                        />
                       </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            物业来源获取类型
-                          </label>
-                          <select
-                            value={formData.propertySource || '一手业主托管'}
-                            onChange={(e) => updateField('propertySource', e.target.value)}
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all"
-                          >
-                            <option value="一手开发商自营">一手开发商自营 (Developer-Owned)</option>
-                            <option value="一手业主托管">一手业主授权托管 (Managed Host)</option>
-                            <option value="二手承租转让">二手包租公转售/承租转让 (Sublease)</option>
-                            <option value="政府保障房/配购房">政府保障性公租房/人才公寓 (Gov Support)</option>
-                            <option value="回迁安置房/村集体物权">村集体返还地/安置房 (Village Collective)</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            拟投入使用的物理计租总面积
-                          </label>
-                          <div className="relative">
-                            <input
-                              type="number"
-                              value={formData.area}
-                              onChange={(e) => updateField('area', e.target.value)}
-                              placeholder="如: 1850.5"
-                              className="w-full pl-3 pr-12 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all"
-                            />
-                            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-gray-400 font-mono">
-                              ㎡
-                            </div>
-                          </div>
-                        </div>
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-gray-700">行政区 (District) *</label>
+                        <input 
+                          type="text" 
+                          value={formData.district || ''} 
+                          onChange={(e) => updateField('district', e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                          placeholder="例如: 闵行区 / 浦东新区"
+                        />
                       </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                          项目及物理基础说明 (Project Memo)
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={formData.description || ''}
-                          onChange={(e) => updateField('description', e.target.value)}
-                          placeholder="可备注项目的物理特征，周边配套如离地铁距离，是否通强电配电，适合的特定经营业态等..."
-                          className="w-full px-3.5 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400 resize-none"
+                      <div className="col-span-1 md:col-span-2 space-y-1">
+                        <label className="block text-xs font-bold text-gray-700">物理道路与街道门牌号 (Street Address) *</label>
+                        <input 
+                          type="text" 
+                          id="wizard-address-input"
+                          value={formData.streetAddress || ''} 
+                          onChange={(e) => updateField('streetAddress', e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                          placeholder="例如: 申长路999号B座"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-xs font-bold text-gray-700">楼栋/单元/幢范围描述 (Building No) *</label>
+                        <input 
+                          type="text" 
+                          id="wizard-building-input"
+                          value={formData.buildingNo || ''} 
+                          onChange={(e) => updateField('buildingNo', e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                          placeholder="例如: 3号楼2单元整幢"
                         />
                       </div>
                     </div>
+
+                    {/* NEW FIELDS FOR ENTIRE & SHARED: Door Number & Room Layout Structure */}
+                    {formData.managementMode !== 'central' && (
+                      <div className="bg-white p-5 rounded-xl border border-gray-200/80 space-y-4">
+                        <h4 className="text-xs font-bold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
+                          <span className="w-1.5 h-3 bg-indigo-600 rounded-sm"></span>
+                          <span>🏡 独门套房专属参数 (Suite Details)</span>
+                        </h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-gray-700">门牌号 (Door/Suite Number) *</label>
+                            <input 
+                              type="text" 
+                              value={formData.doorNo || ''} 
+                              onChange={(e) => updateField('doorNo', e.target.value)}
+                              className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                              placeholder="例如: 101室 / 1802室 (默认为101)"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-gray-700">套内房间户型体系 (House Structure) *</label>
+                            <select 
+                              value={formData.houseType || '三室一厅一卫'} 
+                              onChange={(e) => updateField('houseType', e.target.value)}
+                              className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white"
+                            >
+                              <option value="三室一厅一卫">三室一厅一卫 (3B1B)</option>
+                              <option value="四室一厅两卫">四室一厅两卫 (4B2B)</option>
+                              <option value="两室一厅一卫">两室一厅一卫 (2B1B)</option>
+                              <option value="单室独立公寓">单室独立公寓 (1B0B)</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Floor details selection (only show if we want to generate rooms eventually) */}
+                    {(formData.entryDepth || 'full') === 'full' && (
+                      <div className="bg-white p-5 rounded-xl border border-gray-200/80 space-y-4">
+                        <h4 className="text-xs font-bold text-gray-900 border-b border-gray-100 pb-2">🏢 区间楼层与层均规划 (Floor Ranges)</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-gray-700">起始楼层 (Floor Start)</label>
+                            <input 
+                              type="number" 
+                              value={formData.floorStart || '1'} 
+                              onChange={(e) => updateField('floorStart', e.target.value)}
+                              className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-gray-700">截止楼层 (Floor End)</label>
+                            <input 
+                              type="number" 
+                              value={formData.floorEnd || '10'} 
+                              onChange={(e) => updateField('floorEnd', e.target.value)}
+                              className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="block text-xs font-bold text-gray-700">层均房间数量/套数 (Rooms per Floor)</label>
+                            <input 
+                              type="number" 
+                              value={formData.roomsPerFloor || '4'} 
+                              onChange={(e) => updateField('roomsPerFloor', e.target.value)}
+                              className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Exceptions Tag Input */}
+                        <div className="space-y-2">
+                          <label className="block text-xs font-bold text-gray-700">排除特定楼层或房间 (Exclude Floors/Rooms)</label>
+                          <div className="flex space-x-2">
+                            <input 
+                              type="text" 
+                              value={exceptionsInput} 
+                              onChange={(e) => setExceptionsInput(e.target.value)}
+                              className="flex-1 text-xs p-2.5 rounded-lg border border-gray-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                              placeholder="例如: 4层 或 404室"
+                              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addException(); } }}
+                            />
+                            <button 
+                              type="button" 
+                              onClick={addException}
+                              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 active:bg-slate-950 text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                            >
+                              排除添加
+                            </button>
+                          </div>
+                          
+                          {formData.exceptionsList && formData.exceptionsList.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {formData.exceptionsList.map((item, i) => (
+                                <span key={i} className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-mono">
+                                  <span>{item}</span>
+                                  <button type="button" onClick={() => removeException(item)} className="text-slate-400 hover:text-slate-600">
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 )}
 
                 {/* STEP 3: 产权 / 房东主体 (Ownership & Landlord Details) */}
-                {formData.currentStep === 3 && (
+                {currentStepKey === 'ownership' && (
                   <motion.div 
                     key="step-ownership"
                     initial={{ opacity: 0, y: 10 }}
@@ -913,83 +922,112 @@ export default function PropertyWizard({
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            主体名称 / 产权法团 / 房东姓名 <span className="text-rose-500">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.ownerName || ''}
-                            onChange={(e) => updateField('ownerName', e.target.value)}
-                            placeholder="产权证上的名字，或大业主法团全称 (如: 张铁柱、临港投资集团)"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
+                      {/* CONDITIONAL RENDERING: Fold fields if self-owned */}
+                      {formData.holdingType === 'self' ? (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-5 rounded-xl border border-indigo-100 bg-indigo-50/30 space-y-3"
+                        >
+                          <div className="flex items-center space-x-2 text-indigo-800">
+                            <Sparkles className="w-5 h-5 text-indigo-600" />
+                            <h4 className="text-xs font-bold uppercase tracking-wider">✨ 集团自持自营核算机制</h4>
+                          </div>
+                          <p className="text-gray-500 text-[11px] leading-relaxed">
+                            当前资产属于公司<strong>「自持自营」</strong>。已自动为您豁免并折叠以下第三方房东证照、联系电话、签约契约等 5 个表单项。
+                          </p>
+                          <div className="text-[10px] text-indigo-600/80 space-y-1 bg-white p-3 rounded-lg border border-indigo-100/50 font-mono">
+                            <div>• 免除：第三方大房东实名备案</div>
+                            <div>• 免除：转租契约/授权托管书附件上传</div>
+                            <div>• 免除：出收金差额财务科目匹配</div>
+                            <div>• 财务核算：公司大盘统一划拨及内部资产科目归账</div>
+                          </div>
+                        </motion.div>
+                      ) : (
+                        <motion.div 
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="space-y-5"
+                        >
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                                产权主体名称 / 房东姓名 <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.ownerName || ''}
+                                onChange={(e) => updateField('ownerName', e.target.value)}
+                                placeholder="大业主全称 (如: 张铁柱、临港投资集团)"
+                                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
+                              />
+                            </div>
 
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            主体负责人 / 权属联系人姓名
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.ownerContact || ''}
-                            onChange={(e) => updateField('ownerContact', e.target.value)}
-                            placeholder="对接授权签约、保修协调的专员姓名"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
-                      </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                                主体负责人 / 权属联系人姓名
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.ownerContact || ''}
+                                onChange={(e) => updateField('ownerContact', e.target.value)}
+                                placeholder="联系签约、保修协调专员"
+                                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
+                              />
+                            </div>
+                          </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            主体联络电话 <span className="text-rose-500">*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.ownerPhone || ''}
-                            onChange={(e) => updateField('ownerPhone', e.target.value)}
-                            placeholder="如: 13901234567 (用于代收账单及紧急故障告知)"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                                主体联络电话 <span className="text-rose-500">*</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.ownerPhone || ''}
+                                onChange={(e) => updateField('ownerPhone', e.target.value)}
+                                placeholder="如: 13901234567 (用于紧急故障及账单通知)"
+                                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
+                              />
+                            </div>
 
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                            权属主体与项目的法律关系
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.ownerRelation || ''}
-                            onChange={(e) => updateField('ownerRelation', e.target.value)}
-                            placeholder="如: 业主本人授权、子公司自持托管、配股合伙代表"
-                            className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
-                          />
-                        </div>
-                      </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                                权属主体与项目的法律关系
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.ownerRelation || ''}
+                                onChange={(e) => updateField('ownerRelation', e.target.value)}
+                                placeholder="如: 业主本人授权、二手包租委托"
+                                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-white focus:outline-hidden focus:border-indigo-600 focus:ring-2 focus:ring-indigo-50 transition-all placeholder:text-gray-400"
+                              />
+                            </div>
+                          </div>
 
-                      <div className="bg-slate-50 border border-gray-200/60 rounded-xl p-4 flex items-center justify-between">
-                        <div className="flex items-center space-x-2.5">
-                          <input
-                            type="checkbox"
-                            id="doc-uploaded"
-                            checked={formData.ownerDocUploaded || false}
-                            onChange={(e) => updateField('ownerDocUploaded', e.target.checked)}
-                            className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
-                          />
-                          <label htmlFor="doc-uploaded" className="text-xs font-medium text-gray-700 cursor-pointer select-none">
-                            已经在线核对产权证原件、企业工商执照、及法定代表人身份证
-                          </label>
-                        </div>
-                        <span className="text-[10px] text-gray-400 font-mono hidden md:block">LAW REVIEW VERIFICATION</span>
-                      </div>
+                          <div className="bg-slate-50 border border-gray-200/60 rounded-xl p-4 flex items-center justify-between">
+                            <div className="flex items-center space-x-2.5">
+                              <input
+                                type="checkbox"
+                                id="doc-uploaded"
+                                checked={formData.ownerDocUploaded || false}
+                                onChange={(e) => updateField('ownerDocUploaded', e.target.checked)}
+                                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                              />
+                              <label htmlFor="doc-uploaded" className="text-xs font-medium text-gray-700 cursor-pointer select-none">
+                                已经在线核对产权证原件、企业工商执照、及法定代表人身份证
+                              </label>
+                            </div>
+                            <span className="text-[10px] text-gray-400 font-mono hidden md:block">LAW REVIEW VERIFICATION</span>
+                          </div>
+                        </motion.div>
+                      )}
                     </div>
                   </motion.div>
                 )}
 
                 {/* STEP 4: 房型体系建立 (Unit Layout templates & parameters) */}
-                {formData.currentStep === 4 && (
+                {currentStepKey === 'layout' && (
                   <motion.div 
                     key="step-layout"
                     initial={{ opacity: 0, y: 10 }}
@@ -1111,7 +1149,7 @@ export default function PropertyWizard({
                         </div>
 
                         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-[10px] text-indigo-900 leading-normal font-sans">
-                          💡 <strong>模板推荐优势：</strong>一旦存留该房型，在后续步骤 5 的房间排号生成时，这些层高、卫浴、采光及床位规格将以 100% 映射继承，帮您节约手动逐间录入的时间。
+                          💡 <strong>模板推荐优势：</strong>一旦存留该房型，在后续步骤的房间排号生成时，这些层高、卫浴、采光及床位规格将以 100% 映射继承，帮您节约手动逐间录入的时间。
                         </div>
                       </div>
                     ) : (
@@ -1124,7 +1162,7 @@ export default function PropertyWizard({
                 )}
 
                 {/* STEP 5: 房间结构生成与匹配 (Room generation & structural logic) */}
-                {formData.currentStep === 5 && (
+                {currentStepKey === 'rooms' && (
                   <motion.div 
                     key="step-rooms"
                     initial={{ opacity: 0, y: 10 }}
@@ -1285,7 +1323,7 @@ export default function PropertyWizard({
                 )}
 
                 {/* STEP 6: 费用、备注、附件与收口 (Closing, Upload & Checklist) */}
-                {formData.currentStep === 6 && (
+                {currentStepKey === 'closing' && (
                   <motion.div 
                     key="step-closing"
                     initial={{ opacity: 0, y: 10 }}
@@ -1452,7 +1490,7 @@ export default function PropertyWizard({
                           <div className="space-y-1">
                             <p className="truncate"><span className="text-indigo-400">物权:</span> {formData.propertyType === 'residential' ? '普通住宅' : formData.propertyType === 'commercial' ? '商业商铺' : '工业厂房'}</p>
                             <p className="truncate"><span className="text-indigo-400">管理:</span> {formData.managementMode === 'central' ? '集中管理' : '整租管理'}</p>
-                            <p className="truncate"><span className="text-indigo-400">范围:</span> {formData.entryScope === 'skeleton' ? '仅骨架' : formData.entryScope === 'layout' ? '项目+房型' : '全量打穿'}</p>
+                            <p className="truncate"><span className="text-indigo-400">范围:</span> {formData.entryDepth === 'skeleton' ? '仅骨架' : formData.entryDepth === 'layout' ? '项目+房型' : '全量打穿'}</p>
                           </div>
                         </div>
 
@@ -1474,13 +1512,18 @@ export default function PropertyWizard({
                             <button onClick={() => updateField('currentStep', 3)} className="text-[10px] text-indigo-400 hover:text-white underline">修改</button>
                           </div>
                           <div className="space-y-1">
-                            <p className="truncate font-bold text-white">{formData.ownerName || '未填写'}</p>
-                            <p className="truncate"><span className="text-indigo-400">电话:</span> {formData.ownerPhone || '未填写'}</p>
-                            <p className="truncate text-[10px]"><span className="text-indigo-400">审核:</span> {formData.ownerDocUploaded ? '✓ 已验证原件' : '✗ 待验原件'}</p>
+                            {formData.holdingType === 'self' ? (
+                              <p className="text-indigo-300 italic font-bold">✓ 集团自持自营</p>
+                            ) : (
+                              <>
+                                <p className="truncate font-bold text-white">{formData.ownerName || '未填写'}</p>
+                                <p className="truncate"><span className="text-indigo-400">电话:</span> {formData.ownerPhone || '未填写'}</p>
+                              </>
+                            )}
                           </div>
                         </div>
 
-                        {formData.entryScope === 'skeleton' ? (
+                        {formData.entryDepth === 'skeleton' ? (
                           <div className="bg-indigo-900/20 p-3 rounded-lg border border-indigo-900/40 opacity-50">
                             <div className="flex items-center justify-between text-indigo-400 border-b border-indigo-950 pb-1 mb-1.5">
                               <span className="font-bold">4. 房型参数</span>
@@ -1505,14 +1548,14 @@ export default function PropertyWizard({
                           </div>
                         )}
 
-                        {formData.entryScope === 'skeleton' || formData.entryScope === 'layout' ? (
+                        {formData.entryDepth === 'skeleton' || formData.entryDepth === 'to_contract' ? (
                           <div className="bg-indigo-900/20 p-3 rounded-lg border border-indigo-900/40 opacity-50">
                             <div className="flex items-center justify-between text-indigo-400 border-b border-indigo-950 pb-1 mb-1.5">
                               <span className="font-bold">5. 房间生成</span>
                               <span className="text-[8px] bg-indigo-950 px-1 py-0.2 rounded text-indigo-300">跳过</span>
                             </div>
                             <div className="space-y-1 text-[10px] text-indigo-300/60">
-                              <p className="truncate italic">{formData.entryScope === 'skeleton' ? '骨架排除生成' : '房型模式跳过房间'}</p>
+                              <p className="truncate italic">骨架排除/待签合同跳过</p>
                               <p className="truncate text-emerald-400/80 font-bold">物理客房总量: 0 间</p>
                             </div>
                           </div>
@@ -1531,6 +1574,101 @@ export default function PropertyWizard({
                         )}
 
                       </div>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* NEW STEP 7: 签署合同 (Mock ownership/agency contract step for Entire/Shared modes) */}
+                {currentStepKey === 'contract' && (
+                  <motion.div 
+                    key="step-contract"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="space-y-6"
+                  >
+                    <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-xl flex items-start space-x-3.5 shadow-2xs">
+                      <span className="p-1.5 rounded-lg bg-indigo-100 text-indigo-700 font-bold">📑</span>
+                      <div>
+                        <h4 className="text-xs font-bold text-indigo-900 uppercase tracking-wider">业主托管合同及租金差额备案 (Ownership Contract)</h4>
+                        <p className="text-indigo-700 text-[11px] leading-relaxed mt-0.5">
+                          整租/合租业态属于高法务权重物权。必须在本步骤完善与房东的托管关系、期望租金溢价及平台提成点。
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      
+                      {/* Left Contract Params Block */}
+                      <div className="bg-white rounded-xl border border-gray-200/80 p-5 space-y-4">
+                        <h4 className="text-xs font-bold text-gray-900 border-b border-gray-100 pb-2">📂 契约核心参数录入</h4>
+                        
+                        <div className="space-y-3.5 text-xs">
+                          <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                            <div>
+                              <span className="font-bold text-gray-800 block">业主托管协议签约状态</span>
+                              <span className="text-[10px] text-gray-400">是否已在法律层面确认签署</span>
+                            </div>
+                            <input 
+                              type="checkbox"
+                              checked={formData.hasSignedContract || false}
+                              onChange={(e) => updateField('hasSignedContract', e.target.checked)}
+                              className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-700 mb-1">托管协议期限 (月) *</label>
+                              <input 
+                                type="number"
+                                value={formData.contractDuration || '36'}
+                                onChange={(e) => updateField('contractDuration', e.target.value)}
+                                className="w-full text-xs p-2 rounded-lg border border-gray-200 focus:ring-1 focus:ring-indigo-500"
+                                placeholder="如: 36"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-700 mb-1">平台期望溢价/差额比例 *</label>
+                              <div className="relative">
+                                <input 
+                                  type="text"
+                                  value={formData.markupRatio || '10%'}
+                                  onChange={(e) => updateField('markupRatio', e.target.value)}
+                                  className="w-full text-xs p-2 rounded-lg border border-gray-200 focus:ring-1 focus:ring-indigo-500"
+                                  placeholder="如: 10%"
+                                />
+                                <span className="absolute inset-y-0 right-2.5 flex items-center text-[10px] text-gray-400">%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-3 bg-indigo-50/50 rounded-lg border border-indigo-100/50 text-[10px] text-indigo-700 leading-normal">
+                            💡 <strong>整/合租差额机制：</strong>溢价差额比例将自动代入平台招商计费底价，作为财务对冲起租门槛的法务审计参考。
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Mock Document Upload Area */}
+                      <div className="bg-white rounded-xl border border-gray-200/80 p-5 flex flex-col justify-between">
+                        <div>
+                          <h4 className="text-xs font-bold text-gray-900 border-b border-gray-100 pb-2">📄 合同扫描件及托管确权附件</h4>
+                          <p className="text-gray-400 text-[10px] mt-1.5 leading-normal">
+                            请在此上传由法务签章盖印的业主授权书、托管协议、公证书等盖章本，支持 JPG/PDF。
+                          </p>
+                          
+                          <div className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-400 hover:bg-slate-50/50 transition-all mt-4 flex flex-col items-center justify-center">
+                            <span className="text-2xl mb-1">📑</span>
+                            <span className="text-xs font-semibold text-gray-700 block">业主托管协议扫描原件</span>
+                            <span className="text-[9px] text-gray-400 mt-0.5">点击或拖拽上传，限PDF格式</span>
+                          </div>
+                        </div>
+
+                        <div className="text-[10px] text-gray-400 italic bg-slate-50 p-2.5 rounded-lg mt-4 border border-slate-100 font-mono text-center">
+                          MOCK_CONTRACT_ATTACHMENT_UPLOADER
+                        </div>
+                      </div>
+
                     </div>
                   </motion.div>
                 )}
@@ -1560,27 +1698,64 @@ export default function PropertyWizard({
                   </button>
                 )}
 
-                {formData.currentStep < 6 ? (
-                  <button
-                    id="wizard-next-btn"
-                    type="button"
-                    onClick={handleNext}
-                    className="flex items-center space-x-1 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg text-xs font-bold text-white shadow-md hover:shadow-lg transition-all"
-                  >
-                    <span>下一步</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                ) : (
-                  <button
-                    id="wizard-submit-btn"
-                    type="button"
-                    onClick={handleFinalSubmit}
-                    className="flex items-center space-x-1.5 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-lg text-xs font-black text-white shadow-md hover:shadow-lg transition-all"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>完结提交 房源纵向资产主链 (Submit)</span>
-                  </button>
-                )}
+                {(() => {
+                  const active = getActiveSteps(formData.managementMode!, formData.entryDepth || 'full');
+                  const currIdx = active.findIndex(s => s.id === formData.currentStep);
+                  const isLastStep = currIdx === active.length - 1;
+                  const isBossStop = getBossStopStepId(formData.managementMode!, formData.entryDepth || 'full') === formData.currentStep;
+
+                  if (isBossStop) {
+                    return (
+                      <button
+                        id="wizard-assign-btn"
+                        type="button"
+                        onClick={() => {
+                          let label = '待补房型';
+                          if (formData.managementMode === 'central' && (formData.entryDepth || 'full') === 'skeleton') {
+                            label = '待补房型';
+                          } else if (formData.managementMode === 'shared' && (formData.entryDepth || 'full') === 'to_contract') {
+                            label = '待分配房间';
+                          } else if (formData.managementMode === 'entire' && (formData.entryDepth || 'full') === 'to_contract') {
+                            label = '建档完成（待运营维护）';
+                          } else if ((formData.entryDepth || 'full') === 'skeleton') {
+                            label = formData.managementMode === 'shared' ? '待分配房间' : '待补合同';
+                          }
+                          onAssignSubmit(formData, label);
+                        }}
+                        className="flex items-center space-x-1.5 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-lg text-xs font-black text-white shadow-md hover:shadow-lg transition-all"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{formData.managementMode === 'central' ? '提交骨架，派给业务员补房型' : '提交并指派业务员'}</span>
+                      </button>
+                    );
+                  }
+
+                  if (isLastStep) {
+                    return (
+                      <button
+                        id="wizard-submit-btn"
+                        type="button"
+                        onClick={handleFinalSubmit}
+                        className="flex items-center space-x-1.5 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-lg text-xs font-black text-white shadow-md hover:shadow-lg transition-all"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>完结提交 房源纵向资产主链 (Submit)</span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <button
+                      id="wizard-next-btn"
+                      type="button"
+                      onClick={handleNext}
+                      className="flex items-center space-x-1 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 rounded-lg text-xs font-bold text-white shadow-md hover:shadow-lg transition-all"
+                    >
+                      <span>下一步</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  );
+                })()}
               </div>
             </div>
 

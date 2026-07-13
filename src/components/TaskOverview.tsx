@@ -399,15 +399,18 @@ export default function TaskOverview({
                 {filteredTodos.map((todo) => {
                   const isUrging = todo.status === 'urging';
                   const isCompleted = todo.status === 'completed';
+                  const isAssign = todo.taskKind === 'assign';
                   return (
                     <div 
                       key={todo.id}
-                      className={`bg-white rounded-xl border p-4 shadow-3xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
-                        isUrging 
-                          ? 'border-rose-300 ring-1 ring-rose-300 bg-rose-50/10' 
-                          : isCompleted 
+                      className={`rounded-xl border p-4 shadow-3xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                        isCompleted 
                           ? 'border-gray-100 bg-gray-50/30' 
-                          : 'border-gray-100 hover:border-gray-200'
+                          : isAssign
+                          ? 'border-amber-300 bg-amber-50/40 ring-1 ring-amber-300 shadow-sm hover:bg-amber-50/60'
+                          : isUrging 
+                          ? 'border-rose-300 ring-1 ring-rose-300 bg-rose-50/10 bg-white' 
+                          : 'border-gray-100 hover:border-gray-200 bg-white'
                       }`}
                     >
                       {/* Left: Info Grid */}
@@ -426,15 +429,17 @@ export default function TaskOverview({
 
                           {/* Status Badge */}
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                            isUrging 
-                              ? 'bg-rose-600 text-white animate-pulse-subtle' 
-                              : isCompleted 
+                            isCompleted 
                               ? 'bg-emerald-100 text-emerald-800' 
+                              : isAssign
+                              ? 'bg-amber-650 text-white shadow-xs'
+                              : isUrging 
+                              ? 'bg-rose-600 text-white animate-pulse-subtle' 
                               : todo.status === 'draft_pending'
                               ? 'bg-violet-100 text-violet-800'
                               : 'bg-amber-100 text-amber-800'
                           }`}>
-                            {isUrging ? '🔥 催办处理中' : isCompleted ? '✓ 已办结' : todo.statusLabel}
+                            {isCompleted ? '✓ 已办结' : isAssign ? '📌 协作指派任务' : isUrging ? '🔥 催办处理中' : todo.statusLabel}
                           </span>
 
                           <span className="text-[10px] text-gray-400 font-semibold">• {todo.module}</span>
@@ -462,6 +467,16 @@ export default function TaskOverview({
                       <div className="flex items-center space-x-2 shrink-0 self-end md:self-auto border-t md:border-t-0 pt-2.5 md:pt-0">
                         {!isCompleted && (
                           <>
+                            {isAssign && todo.linkedDraftId && (
+                              <button
+                                id={`assign-resolve-btn-${todo.id}`}
+                                onClick={() => onLaunchDraft(todo.linkedDraftId!)}
+                                className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white text-xs font-black rounded-lg flex items-center space-x-1.5 shadow-md hover:shadow-lg transition-all cursor-pointer"
+                              >
+                                <Play className="w-3.5 h-3.5 fill-current" />
+                                <span>立即去办理/分配</span>
+                              </button>
+                            )}
                             <button
                               id={`urge-btn-${todo.id}`}
                               disabled={isUrging}

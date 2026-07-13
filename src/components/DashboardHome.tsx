@@ -157,8 +157,8 @@ export default function DashboardHome({
       {/* SECTION 2: Split Columns (Fully aligned and visual balanced) */}
       <div id="split-dashboard-content" className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
         
-        {/* LEFT COLUMN: Charts & Operational Analysis (Span 7) */}
-        <div className="lg:col-span-7 flex flex-col justify-between space-y-5">
+        {/* LEFT COLUMN: Charts & Operational Analysis (Span 8) */}
+        <div className="lg:col-span-8 flex flex-col justify-between space-y-5">
           <div className="bg-white border border-gray-150 rounded-xl p-5 shadow-3xs flex-1 flex flex-col justify-between space-y-4">
             
             {/* Analysis Header */}
@@ -390,6 +390,69 @@ export default function DashboardHome({
                       </div>
                     </div>
                   </div>
+
+                  {/* Weekly Detailed Conversion Analytics Table */}
+                  <div className="border border-gray-150 rounded-xl overflow-hidden bg-white shadow-3xs mt-2">
+                    <div className="bg-slate-50 px-3 py-2.5 border-b border-gray-200 grid grid-cols-12 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      <span className="col-span-3">分析 Timeline (天阶段)</span>
+                      <span className="col-span-2 text-right">商机询盘量</span>
+                      <span className="col-span-2 text-right">带看认签数</span>
+                      <span className="col-span-2 text-right">签约转化率</span>
+                      <span className="col-span-2 text-right">主力推广渠道</span>
+                      <span className="col-span-1 text-right">转化评定</span>
+                    </div>
+                    <div className="divide-y divide-gray-100 text-xs">
+                      {weeklyConversionData.map((d, index) => {
+                        const isSelected = index === selectedDayIndex;
+                        let statusColor = "text-emerald-600 bg-emerald-50";
+                        let statusText = "超额 S+";
+                        if (d.rate < 60) {
+                          statusColor = "text-amber-600 bg-amber-50";
+                          statusText = "平稳 B";
+                        } else if (d.rate >= 70) {
+                          statusColor = "text-indigo-600 bg-indigo-50 font-bold";
+                          statusText = "优秀 A";
+                        }
+                        
+                        const channels = ["线上精准推荐", "自媒体抖音矩阵", "老客口碑转介绍", "商协会联合推荐", "线下极速协作", "门店自然自引流", "批量大盘导流"];
+                        const topChannel = channels[index % channels.length];
+
+                        return (
+                          <div 
+                            key={index} 
+                            onClick={() => setSelectedDayIndex(index)}
+                            className={`px-3 py-3 grid grid-cols-12 items-center cursor-pointer transition-colors ${
+                              isSelected 
+                                ? 'bg-indigo-50/70 border-l-2 border-indigo-600 font-semibold' 
+                                : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="col-span-3 flex items-center space-x-2">
+                              <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-indigo-600 animate-pulse-subtle' : 'bg-gray-300'}`} />
+                              <span className={isSelected ? 'text-indigo-950 font-bold' : 'text-gray-700'}>{d.day}</span>
+                            </div>
+                            <div className="col-span-2 text-right font-mono text-gray-600 font-medium">
+                              {d.leads} 组
+                            </div>
+                            <div className="col-span-2 text-right font-mono text-emerald-600 font-semibold">
+                              {d.signings} 单
+                            </div>
+                            <div className="col-span-2 text-right font-mono font-bold text-slate-800">
+                              {d.rate}%
+                            </div>
+                            <div className="col-span-2 text-right text-gray-500 font-sans truncate pl-2">
+                              {topChannel}
+                            </div>
+                            <div className="col-span-1 text-right">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-sans ${statusColor}`}>
+                                {statusText}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -486,36 +549,89 @@ export default function DashboardHome({
                   </div>
 
                   {/* Linked Project Detailed List */}
-                  <div className="border border-gray-150 rounded-xl overflow-hidden bg-slate-50/50">
-                    <div className="bg-slate-100/80 px-3 py-2 border-b border-gray-200 flex justify-between items-center text-[10px] font-bold text-gray-600">
-                      <span>托管子项目名称</span>
-                      <div className="flex space-x-6">
-                        <span>容量/面积</span>
-                        <span>入住率</span>
-                        <span>月均收益</span>
-                      </div>
+                  <div className="border border-gray-150 rounded-xl overflow-hidden bg-white shadow-3xs mt-2">
+                    <div className="bg-slate-50 px-4 py-2.5 border-b border-gray-200 grid grid-cols-12 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      <span className="col-span-4">托管资产子项目名称</span>
+                      <span className="col-span-2 text-right">总容量/租赁面积</span>
+                      <span className="col-span-2 text-right">出租率/入住水位</span>
+                      <span className="col-span-2 text-right">月度租金流水</span>
+                      <span className="col-span-1 text-right">健康评级</span>
+                      <span className="col-span-1 text-right">托管状态</span>
                     </div>
                     <div className="divide-y divide-gray-150 text-xs">
-                      {assetProjectDetails[selectedAssetCategory].map((project, idx) => (
-                        <div key={idx} className="px-3 py-2.5 flex justify-between items-center bg-white hover:bg-slate-50 transition-colors">
-                          <div className="flex items-center space-x-2">
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                              selectedAssetCategory === 'residential' ? 'bg-amber-500' :
-                              selectedAssetCategory === 'commercial' ? 'bg-indigo-600' : 'bg-purple-600'
-                            }`} />
-                            <span className="font-bold text-gray-800">{project.name}</span>
-                            <span className="text-[8px] bg-slate-100 text-slate-500 px-1 py-0.2 rounded font-semibold border border-slate-200">
-                              {project.status}
-                            </span>
+                      {assetProjectDetails[selectedAssetCategory].map((project, idx) => {
+                        const mockOwners = ["张江科创发展有限公司", "上海绿城置业发展部", "临港物流一期开发商", "东方智谷物业发展", "创客大厦联合会", "虹桥瑞创地产"];
+                        const mockDurations = ["2024-2029 (5年)", "2023-2028 (5年)", "2025-2030 (5年)", "2022-2027 (5年)", "2024-2027 (3年)", "2025-2028 (3年)"];
+                        const mockScores = [98, 92, 85, 99, 94, 91];
+                        
+                        const owner = mockOwners[(idx + (selectedAssetCategory === 'commercial' ? 1 : selectedAssetCategory === 'industrial' ? 2 : 0)) % mockOwners.length];
+                        const duration = mockDurations[(idx + (selectedAssetCategory === 'commercial' ? 1 : 0)) % mockDurations.length];
+                        const score = mockScores[(idx + (selectedAssetCategory === 'commercial' ? 1 : 0)) % mockScores.length];
+                        
+                        let scoreColor = "text-emerald-600 bg-emerald-50";
+                        if (score < 90) scoreColor = "text-amber-600 bg-amber-50";
+
+                        return (
+                          <div key={idx} className="px-4 py-3 grid grid-cols-12 items-center hover:bg-slate-50 transition-colors bg-white">
+                            {/* Name & Owner */}
+                            <div className="col-span-4 space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <span className={`w-2 h-2 rounded-full ${
+                                  selectedAssetCategory === 'residential' ? 'bg-amber-500' :
+                                  selectedAssetCategory === 'commercial' ? 'bg-indigo-600' : 'bg-purple-600'
+                                }`} />
+                                <span className="font-bold text-slate-900 text-sm">{project.name}</span>
+                              </div>
+                              <div className="text-[10px] text-gray-500 flex items-center space-x-2 pl-4">
+                                <span>产权主体: {owner}</span>
+                                <span>•</span>
+                                <span>租期: {duration}</span>
+                              </div>
+                            </div>
+                            
+                            {/* Capacity */}
+                            <div className="col-span-2 text-right font-mono font-bold text-gray-700 text-[11px]">
+                              {project.rooms}
+                            </div>
+                            
+                            {/* Occupancy Rate with custom visual gauge */}
+                            <div className="col-span-2 text-right space-y-1 pl-4">
+                              <div className="text-indigo-600 font-mono font-bold text-[11px]">
+                                {project.occupancy}
+                              </div>
+                              <div className="flex justify-end">
+                                <div className="w-16 bg-slate-100 h-1 rounded-full overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full ${
+                                      parseFloat(project.occupancy) >= 90 ? 'bg-emerald-500' : 'bg-indigo-600'
+                                    }`} 
+                                    style={{ width: project.occupancy }} 
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Monthly Revenue */}
+                            <div className="col-span-2 text-right font-mono font-bold text-gray-900 text-sm">
+                              {project.revenue}
+                            </div>
+
+                            {/* Health score */}
+                            <div className="col-span-1 text-right">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${scoreColor}`}>
+                                {score} A
+                              </span>
+                            </div>
+
+                            {/* Status Badge */}
+                            <div className="col-span-1 text-right">
+                              <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold border border-slate-200">
+                                {project.status}
+                              </span>
+                            </div>
                           </div>
-                          
-                          <div className="flex items-center space-x-6 text-[11px] font-mono font-bold text-gray-600">
-                            <span>{project.rooms}</span>
-                            <span className="text-indigo-600">{project.occupancy}</span>
-                            <span className="text-gray-800">{project.revenue}</span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -632,6 +748,53 @@ export default function DashboardHome({
                       </div>
                     </div>
                   </div>
+
+                  {/* Simulator Dynamic Details Table */}
+                  <div className="border border-gray-150 rounded-xl overflow-hidden bg-white shadow-3xs mt-3 animate-fade-in">
+                    <div className="bg-slate-50 px-3 py-2.5 border-b border-gray-200 flex justify-between items-center text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                      <span>模拟预测年度 (Year Grid)</span>
+                      <div className="flex space-x-6 text-right">
+                        <span className="w-20">入住基准率</span>
+                        <span className="w-24">测算年化总流水</span>
+                        <span className="w-20">公摊维护开支</span>
+                        <span className="w-24">预计净利润</span>
+                        <span className="w-24">投资回报倍数 (ROI)</span>
+                        <span className="w-20">置信度评级</span>
+                      </div>
+                    </div>
+                    <div className="divide-y divide-gray-100 text-xs bg-white">
+                      {Array.from({ length: financialProjectionYears }).map((_, yearIdx) => {
+                        const yearNum = yearIdx + 1;
+                        // Annual calculations
+                        const grossRevenue = Math.round(revenueTargetSlider * 3500 * (1 + (yearIdx * 0.05))); // 5% annual rent growth
+                        const maintenanceCost = Math.round(grossRevenue * 0.12); // 12% OPEX
+                        const netProfit = grossRevenue - maintenanceCost;
+                        const roiMultiplier = (1.2 + (yearIdx * 0.15)).toFixed(2);
+                        const confidence = yearNum === 1 ? "高 (95%)" : yearNum === 2 ? "中高 (88%)" : yearNum === 3 ? "中等 (75%)" : "预期 (60%)";
+
+                        return (
+                          <div key={yearIdx} className="px-3 py-2.5 flex justify-between items-center hover:bg-indigo-50/20 transition-colors bg-white">
+                            <div className="flex items-center space-x-2">
+                              <span className="bg-indigo-100 text-indigo-700 text-[10px] font-bold font-mono px-2 py-0.5 rounded">
+                                第 {yearNum} 年度
+                              </span>
+                              <span className="text-gray-500 text-[11px] font-sans">
+                                (2026 + {yearIdx}年)
+                              </span>
+                            </div>
+                            <div className="flex items-center space-x-6 text-[11px] font-mono font-bold text-gray-600 text-right">
+                              <span className="w-20">{revenueTargetSlider}%</span>
+                              <span className="w-24 text-gray-900">¥{grossRevenue.toLocaleString()}</span>
+                              <span className="w-20 text-rose-600">-¥{maintenanceCost.toLocaleString()}</span>
+                              <span className="w-24 text-emerald-600">¥{netProfit.toLocaleString()}</span>
+                              <span className="w-24 text-indigo-600">{roiMultiplier} x</span>
+                              <span className="w-20 text-gray-500 font-sans text-xs">{confidence}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -658,8 +821,8 @@ export default function DashboardHome({
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Interactive alerts, collapsible todos, and new Turnaround Dashboard (Span 5) */}
-        <div className="lg:col-span-5 flex flex-col justify-between space-y-5">
+        {/* RIGHT COLUMN: Interactive alerts, collapsible todos, and new Turnaround Dashboard (Span 4) */}
+        <div className="lg:col-span-4 flex flex-col justify-between space-y-5">
           
           {/* CARD A: 紧急事项催办 (Urgent alerts, collapsed by default, click to expand) */}
           <div className="bg-rose-50/60 border border-rose-200/80 rounded-xl p-4 space-y-3 shadow-3xs flex-1 flex flex-col justify-between">
